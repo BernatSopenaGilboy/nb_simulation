@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from main import NetworkBelief
+from network_belief import NetworkBelief
 
 N, M, O = 3, 2, 4
 
@@ -47,8 +47,10 @@ def test_run_step_keeps_valid_states(model):
 
 def test_run_history_shape(model):
     history = model.run(5)
-    assert history.shape == (6, N, M)
-    assert np.array_equal(history[-1], model.b)
+    assert history.b.shape == (6, N, M)
+    assert history.s.shape == (6, N, M, N)
+    assert np.array_equal(history.b[-1], model.b)
+    assert np.array_equal(history.s[-1], model.s)
 
 
 def test_sample_returns_valid_states(model):
