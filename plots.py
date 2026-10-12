@@ -94,4 +94,26 @@ def plot_topic_correlation(history: NDArray, last: int = 1, ax=None):
     ax.set_ylabel("topic")
     ax.set_title(f"Topic correlation (last {last} steps)")
     plt.colorbar(im, ax=ax, label="correlation")
+    return ax, corr
+
+
+def plot_scatter_topic_beliefs(history: NDArray, topic_x: int, topic_y: int, last: int = 1, ax=None):
+    """Scatter beliefs of topic_y against topic_x across nodes, pooled over the last `last` steps.
+
+    Marker area is proportional to how many node-steps share that belief pair.
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(4.5, 4))
+
+    samples = history[-last:, :, [topic_x, topic_y]].reshape(-1, 2)  # (last*n, 2)
+
+    ax.scatter(samples[:,0], samples[:,1])
+
+    ax.set_xlim(-1.1, 1.1)
+    ax.set_ylim(-1.1, 1.1)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel(f"topic {topic_x}")
+    ax.set_ylabel(f"topic {topic_y}")
+    ax.set_title(f"Topics {topic_x} vs {topic_y} (last {last} steps)")
+    
     return ax

@@ -24,6 +24,11 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import  NDArray
 from scipy.special import expit
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
 
 
 class History(NamedTuple):
@@ -47,17 +52,32 @@ class NetworkBelief:
     def __init__(
         self, n: int, m: int, o: int,
         beta_pers: float, beta_soc: float, beta_ext: float,
+        focal_belief_idx: int | None = None,
         seed: int | np.random.Generator | None = None
     ) -> None:
         """Set up couplings and random initial spins for n nodes, m beliefs and o candidate states."""
         self.rng = np.random.default_rng(seed)
 
+        self.n = n
+        self.m = m
+        self.o = o
+
         self.w = np.ones((n, m, m))*self.w_strength # Coupling internal belief
         self.w[:, np.arange(m), np.arange(m)] = 0 #Diag to 0
+        self.focal_belief_idx = focal_belief_idx
 
-        self.rho = np.ones((n, m, n))*self.rho_strength # Coupling internal-social beliefs
+        if self.focal_belief_idx is not None:
+            try:
+                self.rho = np.zeros((n,m,n))
+                self.rho[:,self.focal_belief_idx,:] = 1
+            except Exception as e:
+                raise ValueError(f"focal belief = {self.focal_belief_idx}, needs to be an int between 0 and {self.m}; {e}")
+        else:
+            self.rho = np.ones((n, m, n))*self.rho_strength # Coupling internal-social beliefs
+        
+
         self.alpha = np.ones((n, m, n))*self.alpha_strength # Coupling external-social beliefs
-        self.tau = np.ones((n,m))*self.tau_strength
+        self.tau = np.ones((n,m))*self.tau_strength #external field
 
         self.v = np.linspace(-1,1,o) # Candidate states
         self.b = self.rng.choice(self.v, size=(n,m)) # belief spins
