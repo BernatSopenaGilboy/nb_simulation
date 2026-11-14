@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from network_belief import NetworkBelief
+from network_belief import BaseNetworkBelief, NetworkBeliefParallel
 
 
 def reproduce_figure_g1(
@@ -12,13 +12,17 @@ def reproduce_figure_g1(
     beta_low: float = 0.5, beta_high: float = 2.0, beta_base: float = 1.0,
     focal_belief_idx: int = 0, n_traces: int = 5, trace_node: int = 0,
     seed: int | None = 0,
+    model_class: type[BaseNetworkBelief] = NetworkBeliefParallel,
 ):
     """Simulate the β_pers, β_soc and β_ext sweeps of Dalege et al. (2024), Appendix G, and draw Figure G1 (b)–(n).
 
     Each sweep sets one β to `beta_low` or `beta_high` and keeps the other two at `beta_base`.
     Defaults follow the paper: 10 individuals in a fully connected external network, 10 personal
     beliefs each, 7 states, 100 iterations, 1,000 runs per condition (ω = .4, ρ = 1, α = 1.4 are the
-    `NetworkBelief` defaults).
+    `BaseNetworkBelief` defaults).
+
+    `model_class` selects the simulation type (e.g. `NetworkBeliefParallel` or the sequential
+    `NetworkBelief`). It must take the `BaseNetworkBelief` constructor arguments and implement `run(steps)`.
 
     Returns (fig, df). `df` is long format with columns
     sweep, beta, run, iteration, node, metric, value; `node` is NaN for run-level metrics:
@@ -56,7 +60,7 @@ def reproduce_figure_g1(
             betas = {"beta_pers": beta_base, "beta_soc": beta_base, "beta_ext": beta_base, f"beta_{sweep}": beta}
             traced = set(trace_rng.choice(n_runs, min(n_traces, n_runs), replace=False)) if sweep == "pers" else set()
             for run, run_seed in enumerate(seq.spawn(n_runs)):
-                history = NetworkBelief(n, m, o, **betas, focal_belief_idx=f, seed=run_seed).run(steps)
+                history = model_class(n, m, o, **betas, focal_belief_idx=f, seed=run_seed).run(steps)
                 b, s = history.b[-1], history.s[-1]
                 social = s[:, f, :][others].reshape(n, n - 1)
                 actual = np.broadcast_to(b[None, :, f], (n, n))[others].reshape(n, n - 1)

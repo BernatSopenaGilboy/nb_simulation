@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
-from network_belief import NetworkBelief
+from network_belief import NetworkBeliefParallel
 
 N, M, O = 3, 2, 4
 
 
 @pytest.fixture
 def model():
-    return NetworkBelief(N, M, O, beta_pers=1.0, beta_soc=1.0, beta_ext=1.0, seed=0)
+    return NetworkBeliefParallel(N, M, O, beta_pers=1.0, beta_soc=1.0, beta_ext=1.0, seed=0)
 
 
 def test_init_shapes(model):

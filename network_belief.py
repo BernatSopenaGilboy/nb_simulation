@@ -19,12 +19,14 @@
 #D_pers = \beta_pers H_pers + \beta_soc H_soc
 #D_soc = \beta_soc H_soc + \beta_ext H_ext  ## ALL BELIEFS HAVE A SOCIAL BELIEF
 
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from typing import NamedTuple
 import numpy as np
 from numpy.typing import  NDArray
 from scipy.special import expit
 import logging
+
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,18 +45,18 @@ def _to_float(name: str, value: float) -> float:
     except (ValueError, TypeError) as e:
         raise ValueError(f"{name} could not be converted to a float: {e}") from e
 
-class NetworkBelief:
+class BaseNetworkBelief(ABC):
     tau_strength = 0.0
     w_strength = 0.4
     rho_strength = 1.0
     alpha_strength = 1.4
-
+        
     def __init__(
-        self, n: int, m: int, o: int,
-        beta_pers: float, beta_soc: float, beta_ext: float,
-        focal_belief_idx: int | None = None,
-        seed: int | np.random.Generator | None = None
-    ) -> None:
+    self, n: int, m: int, o: int,
+    beta_pers: float, beta_soc: float, beta_ext: float,
+    focal_belief_idx: int | None = None,
+    seed: int | np.random.Generator | None = None
+) -> None:
         """Set up couplings and random initial spins for n nodes, m beliefs and o candidate states."""
         self.rng = np.random.default_rng(seed)
 
@@ -80,16 +82,60 @@ class NetworkBelief:
         self.tau = np.ones((n,m))*self.tau_strength #external field
 
         self.v = np.linspace(-1,1,o) # Candidate states
-        self.b = self.rng.choice(self.v, size=(n,m)) # belief spins
+        self.b = self.rng.choice(self.v, size=(n,m)) # belief spins, agent - belief
         self.s = self.rng.choice(self.v, (n,m,n)) # social spins
 
 
         self.beta_pers = _to_float("beta_pers", beta_pers)
         self.beta_soc = _to_float("beta_soc", beta_soc)
         self.beta_ext = _to_float("beta_ext", beta_ext)
+    
+    @abstractmethod
+    def run_step(self):
+        pass
+
+    def glauber_prob(self, delta_D: NDArray):
+        """Normalised Glauber transition probabilities over candidate states (last axis)."""
+        p = expit(delta_D)
+        return p / p.sum(axis=-1, keepdims=True)
+
+    def sample(self, p):
+        """Draw one candidate state per spin from probabilities p (last axis)."""
+
+        # CDF trick
+        size = p.shape[:-1] + (1,)
+        u = self.rng.uniform(size = size) 
+        cumsum = p.cumsum(axis=-1)
+        indx = (cumsum < u).sum(axis=-1)
+        return self.v[indx] #fancy indexing
+
+    def run(self, steps: int) -> History:
+        """Run for a number of steps and return the belief and social histories, including the initial state."""
+        history_b = np.empty((steps + 1,) + self.b.shape)
+        history_s = np.empty((steps + 1,) + self.s.shape)
+        history_b[0] = self.b
+        history_s[0] = self.s
+        for t in range(1, steps + 1):
+            self.run_step()
+            history_b[t] = self.b
+            history_s[t] = self.s
+        return History(b=history_b, s=history_s)
+
+        
+
+class NetworkBeliefParallel(BaseNetworkBelief):
 
 
-    # delta = H_current - H_candidate
+    def __init__(
+        self, n: int, m: int, o: int,
+        beta_pers: float, beta_soc: float, beta_ext: float,
+        focal_belief_idx: int | None = None,
+        seed: int | np.random.Generator | None = None
+    ) -> None:
+        """Set up couplings and random initial spins for n nodes, m beliefs and o candidate states."""
+        
+        super().__init__( n, m, o, beta_pers, beta_soc, beta_ext, focal_belief_idx, seed)
+
 
     def delta_H_pers_b(self) -> NDArray: #(n, m, o)
         """Change in personal energy for moving each belief to each candidate state."""
@@ -127,22 +173,6 @@ class NetworkBelief:
         """Change in dissonance felt by social spins (social + external)."""
         return self.beta_soc*self.delta_H_soc_s() + self.beta_ext*self.delta_H_ext_s()
 
-
-    def glauber_prob(self, delta_D: NDArray):
-        """Normalised Glauber transition probabilities over candidate states (last axis)."""
-        p = expit(delta_D)
-        return p / p.sum(axis=-1, keepdims=True)
-
-    def sample(self, p):
-        """Draw one candidate state per spin from probabilities p (last axis)."""
-
-        # CDF trick
-        size = p.shape[:-1] + (1,)
-        u = self.rng.uniform(size = size) 
-        cumsum = p.cumsum(axis=-1)
-        indx = (cumsum < u).sum(axis=-1)
-        return self.v[indx] #fancy indexing
-    
     def run_step(self):
         """Update all beliefs and social spins in parallel from the current state."""
 
@@ -151,22 +181,53 @@ class NetworkBelief:
 
         self.b = self.sample(self.glauber_prob(delta_D_pers))
         self.s = self.sample(self.glauber_prob(delta_D_soc))
+
+
+class NetworkBelief(BaseNetworkBelief):
+
+    def __init__(self, n: int, m: int, o: int, beta_pers: float, beta_soc: float, beta_ext: float, focal_belief_idx: int | None = None, seed: int | np.random.Generator | None = None) -> None:
+        super().__init__(n, m, o, beta_pers, beta_soc, beta_ext, focal_belief_idx, seed)
+
+    # Sign convention: deltas are H_candidate - H_current, so sampling uses glauber_prob(-delta_D).
+
+   
+    def delta_H_pers_b(self, agent, belief):
+        field = self.tau[agent, belief].reshape(-1,1)[:, :, None]*(self.v[None, None, :] -self.b[agent, belief].reshape(-1,1)[:, :, None])
+        internal =  (self.w[agent,belief] * self.b[agent, :]).sum(-1).reshape(-1,1)[:, :, None]*(self.v[None, None, :] -self.b[agent, belief].reshape(-1, 1)[:, :, None])
+        return -field -internal
+
+    def delta_H_soc_b(self, agent, belief):
+        social = (self.rho[agent, belief, :] * self.s[agent, belief, :]).sum(-1).reshape(-1,1)[:, :, None]
+        return -social*(self.v[None, None, :] -self.b[agent, belief].reshape(-1,1)[:, :, None])
+
+    def delta_H_soc_s(self, agent, belief): #(k, n, o)
+        """Change in social energy for moving each s[agent, belief, :] to each candidate state."""
+        agent = np.atleast_1d(agent)
+        field = self.rho[agent, belief, :] * self.b[agent, belief][:, None]
+        return -field[:, :, None]*(self.v[None, None, :] - self.s[agent, belief, :][:, :, None])
+
+    def delta_H_ext_s(self, agent, belief): #(k, n, o)
+        """Change in external energy for moving each s[agent, belief, :] to each candidate state."""
+        agent = np.atleast_1d(agent)
+        field = self.alpha[agent, belief, :] * self.b[:, belief][None, :]
+        return -field[:, :, None]*(self.v[None, None, :] - self.s[agent, belief, :][:, :, None])
+
+    def delta_D_soc(self, agent, belief) -> NDArray: #(k, n, o)
+        """Change in dissonance felt by social spins s[agent, belief, :] (social + external)."""
+        return self.beta_soc*self.delta_H_soc_s(agent, belief) + self.beta_ext*self.delta_H_ext_s(agent, belief)
     
-    def run(self, steps: int) -> History:
-        """Run for a number of steps and return the belief and social histories, including the initial state."""
-        history_b = np.empty((steps + 1,) + self.b.shape)
-        history_s = np.empty((steps + 1,) + self.s.shape)
-        history_b[0] = self.b
-        history_s[0] = self.s
-        for t in range(1, steps + 1):
-            self.run_step()
-            history_b[t] = self.b
-            history_s[t] = self.s
-        return History(b=history_b, s=history_s)
-    
+    def delta_D_pers(self, agent, belief) -> NDArray: #(k, 1, o)
+        """Change in felt personal dissonance for moving b[agent, belief] to each candidate state."""
+        return self.beta_pers*self.delta_H_pers_b(agent, belief) + self.beta_soc*self.delta_H_soc_b(agent, belief)
 
-
-
+    def run_step(self) -> None:
+        """Visit beliefs in random order; per belief, update b for all agents, then s from the new b."""
+        agents = np.arange(self.n)
+        for j in self.rng.permutation(self.m):
+            p_b = self.glauber_prob(-self.delta_D_pers(agents, j))
+            self.b[:, j] = self.sample(p_b)[:, 0]
+            p_s = self.glauber_prob(-self.delta_D_soc(agents, j))
+            self.s[:, j, :] = self.sample(p_s)
 
 
 

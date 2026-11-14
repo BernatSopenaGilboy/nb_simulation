@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from figure_g1 import reproduce_figure_g1
+from network_belief import NetworkBeliefParallel
 
 N, M, O, RUNS, STEPS = 4, 3, 7, 3, 5
 
@@ -45,3 +46,15 @@ def test_reproducible():
     _, a = reproduce_figure_g1(n=N, m=M, o=O, n_runs=2, steps=3, seed=7)
     _, b = reproduce_figure_g1(n=N, m=M, o=O, n_runs=2, steps=3, seed=7)
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_model_class_is_used():
+    created = []
+
+    class Spy(NetworkBeliefParallel):
+        def __init__(self, *args, **kwargs):
+            created.append(self)
+            super().__init__(*args, **kwargs)
+
+    reproduce_figure_g1(n=N, m=M, o=O, n_runs=1, steps=2, seed=3, model_class=Spy)
+    assert len(created) == 3 * 2 * 1  # 3 sweeps x 2 betas x 1 run
