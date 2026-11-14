@@ -46,6 +46,23 @@ def _to_float(name: str, value: float) -> float:
         raise ValueError(f"{name} could not be converted to a float: {e}") from e
 
 class BaseNetworkBelief(ABC):
+    """Network of agents holding beliefs b (n, m) and perceptions of others' beliefs s (n, m, n).
+
+    Class attributes set the uniform strength of each coupling; override them in a subclass
+    or overwrite the arrays on an instance to change them.
+
+    Attributes
+    ----------
+    tau_strength : float
+        External field tau on every personal belief.
+    w_strength : float
+        Coupling w between different beliefs of the same agent (self-coupling is 0).
+    rho_strength : float
+        Coupling rho between an agent's belief and its perception of each other agent's belief.
+        Ignored when `focal_belief_idx` is given.
+    alpha_strength : float
+        Coupling alpha between a perception s[i, j, k] and agent k's actual belief b[k, j].
+    """
     tau_strength = 0.0
     w_strength = 0.4
     rho_strength = 1.0
@@ -57,9 +74,31 @@ class BaseNetworkBelief(ABC):
     focal_belief_idx: int | None = None,
     seed: int | np.random.Generator | None = None
 ) -> None:
-        """Set up couplings and random initial spins for n nodes, m beliefs and o candidate states."""
-        self.rng = np.random.default_rng(seed)
+        """Set up couplings and random initial spins for n nodes, m beliefs and o candidate states.
 
+        Parameters
+        ----------
+        n : int
+            Number of agents (nodes).
+        m : int
+            Number of beliefs per agent.
+        o : int
+            Number of candidate states per spin, evenly spaced in [-1, 1].
+        beta_pers : float
+            Weight of the personal energy H_pers (field + inter-belief coupling) in the belief dissonance.
+        beta_soc : float
+            Weight of the social energy H_soc (belief-perception coupling); enters both belief and
+            perception dissonance.
+        beta_ext : float
+            Weight of the external energy H_ext (perception vs. the other agent's actual belief) in
+            the perception dissonance.
+        focal_belief_idx : int or None, optional
+            If given, only this belief is socially coupled: rho is 1 for it and 0 for every other belief.
+            If None, all beliefs are coupled with `rho_strength`.
+        seed : int, numpy.random.Generator or None, optional
+            Seed or generator for the initial spins and the dynamics.
+        """
+        self.rng = np.random.default_rng(seed)
         self.n = n
         self.m = m
         self.o = o
@@ -76,9 +115,12 @@ class BaseNetworkBelief(ABC):
                 raise ValueError(f"focal belief = {self.focal_belief_idx}, needs to be an int between 0 and {self.m}; {e}")
         else:
             self.rho = np.ones((n, m, n))*self.rho_strength # Coupling internal-social beliefs
-        
 
         self.alpha = np.ones((n, m, n))*self.alpha_strength # Coupling external-social beliefs
+        # Agents are not their own contacts
+        self.rho[np.arange(n), :, np.arange(n)] = 0
+        self.alpha[np.arange(n), :, np.arange(n)] = 0
+
         self.tau = np.ones((n,m))*self.tau_strength #external field
 
         self.v = np.linspace(-1,1,o) # Candidate states
